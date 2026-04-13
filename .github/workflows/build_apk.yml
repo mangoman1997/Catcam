@@ -18,8 +18,6 @@ jobs:
         with:
           flutter-version: '3.27.0'
           channel: 'stable'
-          cache: true
-          cache-dependency-path: pubspec.lock
 
       - name: Install dependencies
         run: |
