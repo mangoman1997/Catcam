@@ -232,8 +232,8 @@ class _StencilPreviewPainter extends CustomPainter {
       double distance = 0;
       while (distance < metric.length) {
         final start = distance;
-        final end = (distance + dashWidth).clamp(0, metric.length);
-        final extractPath = metric.extractPath(start, end);
+        final end = (distance + dashWidth).clamp(0.0, metric.length);
+        final extractPath = metric.extractPath(start, end.toDouble());
         canvas.drawPath(extractPath, paint);
         distance += dashWidth + dashSpace;
       }

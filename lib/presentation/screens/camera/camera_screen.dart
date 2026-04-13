@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +8,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../../providers/camera_provider.dart';
 import '../../../providers/editor_provider.dart';
+import '../../../presentation/widgets/stencil_picker_sheet.dart';
 import 'widgets/camera_preview_widget.dart';
 import 'widgets/stencil_overlay_widget.dart';
 import 'widgets/camera_toolbar.dart';
@@ -29,7 +30,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // 隱藏系統UI
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
@@ -63,10 +63,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     setState(() => _isCapturing = true);
 
     try {
-      // 檢查計時器
       final timerSeconds = ref.read(timerSecondsProvider);
       if (timerSeconds > 0) {
-        // 倒計時拍攝
         for (int i = timerSeconds; i > 0; i--) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -80,16 +78,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
         }
       }
 
-      // 拍攝圖片
       final xFile = await controller.takePicture();
       final bytes = await xFile.readAsBytes();
 
-      // 設置到編輯器
       ref.read(editorStateProvider.notifier).setCapturedImage(bytes);
 
       if (!mounted) return;
 
-      // 跳转到编辑页面
       context.push('/editor');
     } catch (e) {
       if (!mounted) return;
@@ -147,7 +142,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       await controller.setFlashMode(newMode);
       ref.read(flashModeProvider.notifier).state = newMode;
     } catch (e) {
-      // 忽略錯誤
+      // ignore
     }
   }
 
@@ -175,7 +170,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 相機預覽
           controllerAsync.when(
             data: (controller) {
               if (controller == null) {
@@ -204,10 +198,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
             ),
           ),
 
-          // 剪影疊加層
           const StencilOverlayWidget(),
 
-          // 頂部工具列
           Positioned(
             top: 0,
             left: 0,
@@ -223,7 +215,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
             ),
           ),
 
-          // 底部控制列
           Positioned(
             bottom: 0,
             left: 0,
@@ -237,16 +228,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    // 最後拍攝縮圖
                     _buildThumbnail(),
-                    
-                    // 拍攝按鈕
                     CaptureButton(
                       onTap: _captureImage,
                       isCapturing: _isCapturing,
                     ),
-                    
-                    // 選貓按鈕
                     _buildSelectCatButton(),
                   ],
                 ),
@@ -274,7 +260,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(AppDimensions.radiusSm - 2),
                 child: Image.file(
-                  java.io.File(lastImage),
+                  File(lastImage),
                   fit: BoxFit.cover,
                 ),
               )
@@ -306,6 +292,3 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     );
   }
 }
-
-// 臨時導入 dart:io
-import 'dart:io' as java;

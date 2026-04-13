@@ -101,7 +101,7 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () {},
               ),
               _SettingsTile(
-                icon: Icons.watermark,
+                icon: Icons.branding_watermark,
                 title: '添加水印',
                 subtitle: '開',
                 trailing: Switch(

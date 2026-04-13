@@ -38,7 +38,10 @@ class CameraToolbar extends ConsumerWidget {
           Row(
             children: [
               _ToolbarButton(
-                icon: _getFlashIcon(flashMode),
+                icon: Icon(
+                  _getFlashIcon(flashMode),
+                  color: Colors.white,
+                ),
                 onTap: onToggleFlash,
               ),
               const SizedBox(width: AppDimensions.spacingSm),
