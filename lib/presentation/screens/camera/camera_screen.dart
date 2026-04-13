@@ -8,6 +8,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../../providers/camera_provider.dart';
 import '../../../providers/editor_provider.dart';
+import '../../../providers/stencil_provider.dart';
 import '../../../presentation/widgets/stencil_picker_sheet.dart';
 import 'widgets/camera_preview_widget.dart';
 import 'widgets/stencil_overlay_widget.dart';
