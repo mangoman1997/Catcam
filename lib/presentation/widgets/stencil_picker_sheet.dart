@@ -136,9 +136,9 @@ class StencilPickerSheet extends ConsumerWidget {
                         stencil: stencil,
                         isSelected: ref.watch(selectedStencilProvider) == stencil,
                         onTap: () {
-                          ref
-                              .read(selectedStencilProvider.notifier)
-                              .state = stencil;
+                          // 同步設置到 both providers
+                          ref.read(selectedStencilProvider.notifier).state = stencil;
+                          ref.read(editorStateProvider.notifier).selectStencil(stencil);
                           Navigator.pop(context);
                         },
                       );
