@@ -75,7 +75,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       final xFile = await controller.takePicture();
       final bytes = await xFile.readAsBytes();
 
+      // 保存當前選中的剪影
+      final selectedStencil = ref.read(selectedStencilProvider);
+      
+      // 設置圖片（同時保留剪影）
       ref.read(editorStateProvider.notifier).setCapturedImage(bytes);
+      
+      // 如果有選中剪影，也設置到 editorState
+      if (selectedStencil != null) {
+        ref.read(editorStateProvider.notifier).selectStencil(selectedStencil);
+      }
 
       if (!mounted) return;
 
