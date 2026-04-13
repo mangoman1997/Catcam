@@ -31,19 +31,11 @@ class _StencilOverlayWidgetState
     });
   }
 
-  Future<void> _loadCurrentStencil() async {
-    final selectedStencil = ref.read(selectedStencilProvider);
-    if (selectedStencil == null) {
-      if (mounted && _stencilImage != null) {
-        setState(() => _stencilImage = null);
-      }
-      return;
-    }
-
-    debugPrint('Loading stencil: ${selectedStencil.assetPath}');
+  Future<void> _loadStencilFromModel(StencilModel model) async {
+    debugPrint('Loading stencil from model: ${model.assetPath}');
 
     try {
-      final data = await DefaultAssetBundle.of(context).load(selectedStencil.assetPath);
+      final data = await DefaultAssetBundle.of(context).load(model.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
@@ -59,6 +51,17 @@ class _StencilOverlayWidgetState
         setState(() => _stencilImage = null);
       }
     }
+  }
+
+  Future<void> _loadCurrentStencil() async {
+    final selectedStencil = ref.read(selectedStencilProvider);
+    if (selectedStencil == null) {
+      if (mounted && _stencilImage != null) {
+        setState(() => _stencilImage = null);
+      }
+      return;
+    }
+    await _loadStencilFromModel(selectedStencil);
   }
 
   void _onScaleStart(ScaleStartDetails details) {}
@@ -84,24 +87,26 @@ class _StencilOverlayWidgetState
 
   @override
   Widget build(BuildContext context) {
-    // 監聽剪影選擇
+    // 監聽剪影選擇變化
     final selectedStencil = ref.watch(selectedStencilProvider);
     
     // 當剪影變化時重新載入
     ref.listen<StencilModel?>(selectedStencilProvider, (previous, next) {
       debugPrint('Stencil changed from ${previous?.name} to ${next?.name}');
-      _loadCurrentStencil();
+      if (next != null) {
+        _loadStencilFromModel(next);
+      } else {
+        if (mounted) setState(() => _stencilImage = null);
+      }
     });
 
     // 如果沒有選擇剪影，不顯示任何東西
     if (selectedStencil == null) {
-      debugPrint('No stencil selected');
       return const SizedBox.shrink();
     }
 
     // 如果剪影還沒載入，顯示載入中
     if (_stencilImage == null) {
-      debugPrint('Stencil image not loaded yet');
       return Positioned.fill(
         child: Container(
           color: Colors.transparent,
