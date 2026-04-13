@@ -5,6 +5,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_dimensions.dart';
 import '../../core/constants/app_typography.dart';
 import '../../data/models/stencil_model.dart';
+import '../../providers/editor_provider.dart';
 import '../../providers/stencil_provider.dart';
 
 /// 剪影選擇底部彈出面板

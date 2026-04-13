@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../data/models/stencil_model.dart';
 import '../../../../providers/editor_provider.dart';
 import '../../../../providers/stencil_provider.dart';
 import '../../../../core/constants/app_colors.dart';
