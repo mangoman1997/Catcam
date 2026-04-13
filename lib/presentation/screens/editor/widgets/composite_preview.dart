@@ -124,31 +124,9 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
 
     // 沒有剪影，直接顯示照片
     if (!_imagesLoaded || _stencilImage == null || _capturedImage == null) {
-      // 顯示調試信息
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.memory(
-            editorState.capturedImage!,
-            fit: BoxFit.cover,
-          ),
-          // 顯示調試覆蓋
-          Positioned(
-            top: 10,
-            left: 10,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.black54,
-              child: Text(
-                'DEBUG:\n'
-                'selectedStencil: ${editorState.selectedStencil?.name ?? "null"}\n'
-                'stencilImage: ${_stencilImage != null}\n'
-                'capturedImage: ${_capturedImage != null}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
-          ),
-        ],
+      return Image.memory(
+        editorState.capturedImage!,
+        fit: BoxFit.cover,
       );
     }
 
@@ -247,40 +225,7 @@ class _CatCropPainter extends CustomPainter {
     
     canvas.restore(); // 主 layer
     
-    // 繪製白色邊框
-    _drawStencilBorder(canvas, size, stencilScale, stencilOffsetX, stencilOffsetY);
-  }
-
-  void _drawStencilBorder(Canvas canvas, Size size, double scale, double offsetX, double offsetY) {
-    // 根據 stencil 的形狀繪製邊框
-    // 這裡用一個近似的貓咪形狀
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final w = stencilImage.width * scale;
-    final h = stencilImage.height * scale;
-
-    // 頭部
-    final headRadius = w * 0.2;
-    canvas.drawCircle(
-      Offset(cx, cy - h * 0.15),
-      headRadius,
-      borderPaint,
-    );
-
-    // 身體
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy + h * 0.2),
-        width: w * 0.4,
-        height: h * 0.35,
-      ),
-      borderPaint,
-    );
+    // 不需要繪製邊框（只有拍照預覽需要）
   }
 
   @override

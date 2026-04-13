@@ -46,8 +46,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       final capturedCodec = await ui.instantiateImageCodec(state.capturedImage!);
       final capturedImage = (await capturedCodec.getNextFrame()).image;
 
-      // 創建輸出圖片
-      final size = Size(
+      // 輸出大小 = 照片大小
+      final outputSize = Size(
         capturedImage.width.toDouble(),
         capturedImage.height.toDouble(),
       );
@@ -55,68 +55,54 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
 
-      // 繪製背景色
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()..color = AppColors.cameraBackground,
-      );
-
       // 如果有剪影，應用遮罩
       if (stencilImage != null) {
-        // 計算縮放比例
-        final stencilScaleX = size.width / stencilImage.width;
-        final stencilScaleY = size.height / stencilImage.height;
-        final stencilScale = stencilScaleX > stencilScaleY ? stencilScaleX : stencilScaleY;
-        final stencilOffsetX = (size.width - stencilImage.width * stencilScale) / 2;
-        final stencilOffsetY = (size.height - stencilImage.height * stencilScale) / 2;
+        // 計算比例（與 preview 一致）
+        final stencilScaleX = outputSize.width / stencilImage.width;
+        final stencilScaleY = outputSize.height / stencilImage.height;
+        final stencilScale = stencilScaleX < stencilScaleY ? stencilScaleX : stencilScaleY; // 完整顯示
+        final stencilOffsetX = (outputSize.width - stencilImage.width * stencilScale) / 2;
+        final stencilOffsetY = (outputSize.height - stencilImage.height * stencilScale) / 2;
 
-        // 使用 saveLayer 應用混合模式
-        canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+        final photoScaleX = outputSize.width / capturedImage.width;
+        final photoScaleY = outputSize.height / capturedImage.height;
+        final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY; // 填滿
+        final photoOffsetX = (outputSize.width - capturedImage.width * photoScale) / 2;
+        final photoOffsetY = (outputSize.height - capturedImage.height * photoScale) / 2;
 
+        // 使用 saveLayer + dstIn
+        final rect = Rect.fromLTWH(0, 0, outputSize.width, outputSize.height);
+        
+        canvas.saveLayer(rect, Paint());
+        
         // 繪製照片
-        final photoScaleX = size.width / capturedImage.width;
-        final photoScaleY = size.height / capturedImage.height;
-        final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY;
-        final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
-        final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
-
         canvas.save();
         canvas.translate(photoOffsetX, photoOffsetY);
         canvas.scale(photoScale);
         canvas.drawImage(capturedImage, Offset.zero, Paint());
         canvas.restore();
 
-        // 應用剪影遮罩
+        // 應用剪影遮罩 dstIn
+        canvas.saveLayer(rect, Paint()..blendMode = BlendMode.dstIn);
         canvas.save();
         canvas.translate(stencilOffsetX, stencilOffsetY);
         canvas.scale(stencilScale);
-        
-        final maskPaint = Paint()
-          ..blendMode = BlendMode.dstIn
-          ..filterQuality = FilterQuality.high;
-        
-        canvas.drawImage(stencilImage, Offset.zero, maskPaint);
+        canvas.drawImage(stencilImage, Offset.zero, Paint());
         canvas.restore();
-
-        canvas.restore(); // 結束 saveLayer
+        canvas.restore(); // dstIn
+        
+        canvas.restore(); // main layer
       } else {
         // 沒有剪影，直接繪製照片
-        final photoScaleX = size.width / capturedImage.width;
-        final photoScaleY = size.height / capturedImage.height;
-        final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY;
-        final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
-        final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
-
-        canvas.save();
-        canvas.translate(photoOffsetX, photoOffsetY);
-        canvas.scale(photoScale);
         canvas.drawImage(capturedImage, Offset.zero, Paint());
-        canvas.restore();
       }
 
       // 編碼為 PNG
       final picture = recorder.endRecording();
-      final img = await picture.toImage(size.width.toInt(), size.height.toInt());
+      final img = await picture.toImage(
+        outputSize.width.toInt(),
+        outputSize.height.toInt(),
+      );
       final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
       
       return byteData?.buffer.asUint8List();
