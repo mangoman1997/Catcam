@@ -126,9 +126,9 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
 
     // 如果有剪影，應用剪影遮罩
     if (_imageLoaded && _stencilImage != null && state.selectedStencil != null) {
-      // 使用 BlendMode.dstIn：保留目標（圖片）只在前景（剪影）有內容的區域
-      // 黑色剪影 = 有內容 = 顯示圖片
-      // 透明區域 = 無內容 = 隱藏圖片
+      // dstIn: 只保留目標（照片）在來源（剪影）有內容的區域
+      // 黑色（貓咪）= 有內容 → 顯示照片
+      // 透明 = 無內容 → 隱藏照片
       return ShaderMask(
         shaderCallback: (bounds) {
           return ImageShader(
@@ -139,7 +139,13 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
           );
         },
         blendMode: BlendMode.dstIn,
-        child: imageWidget,
+        child: ColorFiltered(
+          colorFilter: ColorFilter.matrix(_getFilterMatrix(state.filterType)),
+          child: Image.memory(
+            state.capturedImage!,
+            fit: BoxFit.cover,
+          ),
+        ),
       );
     }
 
