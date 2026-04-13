@@ -84,7 +84,7 @@ class _StencilOverlayWidgetState
   Widget build(BuildContext context) {
     final selectedStencil = ref.watch(selectedStencilProvider);
 
-    // 當剪影變化時，重新載入
+    // 監聽剪影變化
     ref.listen<StencilModel?>(selectedStencilProvider, (previous, next) {
       debugPrint('Stencil changed: $previous -> $next');
       if (next != null && next.id != previous?.id) {
@@ -92,19 +92,8 @@ class _StencilOverlayWidgetState
       }
     });
 
-    // 如果沒有選擇剪影，不顯示
     if (selectedStencil == null) {
       return const SizedBox.shrink();
-    }
-
-    // 如果剪影還沒載入，嘗試載入
-    if (_stencilImage == null && !_isLoading) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadStencilFromModel(selectedStencil);
-      });
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      );
     }
 
     if (_stencilImage == null) {
@@ -134,10 +123,7 @@ class _StencilOverlayWidgetState
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 半透明黑色背景
-        Container(color: Colors.black.withOpacity(0.3)),
-
-        // 用 CustomPaint 繪製剪影遮罩
+        // 直接用 CustomPaint 繪製剪影圖片
         Positioned(
           left: left,
           top: top,
@@ -146,9 +132,12 @@ class _StencilOverlayWidgetState
             child: Transform.scale(
               scale: _isFlipped ? -_scale : _scale,
               alignment: Alignment.center,
-              child: CustomPaint(
-                size: Size(stencilSize, stencilSize),
-                painter: _StencilPainter(_stencilImage!),
+              child: Opacity(
+                opacity: 0.6, // 半透明
+                child: CustomPaint(
+                  size: Size(stencilSize, stencilSize),
+                  painter: _SimpleStencilPainter(_stencilImage!),
+                ),
               ),
             ),
           ),
@@ -171,48 +160,41 @@ class _StencilOverlayWidgetState
   }
 }
 
-/// 剪影畫家
-class _StencilPainter extends CustomPainter {
+/// 簡單的剪影畫家 - 直接繪製圖片
+class _SimpleStencilPainter extends CustomPainter {
   final ui.Image image;
 
-  _StencilPainter(this.image);
+  _SimpleStencilPainter(this.image);
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 使用 saveLayer 來應用混合模式
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-
-    // 先填充白色（會被保留的部分）
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..color = Colors.white,
-    );
-
-    // 計算縮放
+    // 計算縮放比例，使圖片完整填充目標區域
     final scaleX = size.width / image.width;
     final scaleY = size.height / image.height;
     final scale = scaleX < scaleY ? scaleX : scaleY;
+    
+    // 居中偏移
     final offsetX = (size.width - image.width * scale) / 2;
     final offsetY = (size.height - image.height * scale) / 2;
 
-    // 繪製剪影（使用 dstOut 混合模式：剪影中黑色的部分會移除白色）
-    canvas.saveLayer(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..blendMode = BlendMode.dstOut,
-    );
+    // 保存狀態
+    canvas.save();
 
-    canvas.drawImage(
-      image,
-      Offset(offsetX, offsetY),
-      Paint()..filterQuality = FilterQuality.high,
-    );
+    // 移動到正確位置
+    canvas.translate(offsetX, offsetY);
+    
+    // 縮放
+    canvas.scale(scale);
 
-    canvas.restore(); // 結束 dstOut
-    canvas.restore(); // 結束 saveLayer
+    // 繪製圖片
+    canvas.drawImage(image, Offset.zero, Paint());
+
+    // 恢復狀態
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _StencilPainter oldDelegate) {
+  bool shouldRepaint(covariant _SimpleStencilPainter oldDelegate) {
     return oldDelegate.image != image;
   }
 }
