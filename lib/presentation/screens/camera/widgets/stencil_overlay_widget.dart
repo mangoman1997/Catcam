@@ -36,10 +36,12 @@ class _StencilOverlayWidgetState
     _isLoading = true;
     
     try {
+      debugPrint('Loading stencil: ${model.assetPath}');
       final data = await DefaultAssetBundle.of(context).load(model.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      debugPrint('Stencil loaded: ${frame.image.width}x${frame.image.height}');
       
       if (mounted) {
         setState(() => _stencilImage = frame.image);
@@ -53,6 +55,7 @@ class _StencilOverlayWidgetState
 
   Future<void> _loadCurrentStencil() async {
     final selectedStencil = ref.read(selectedStencilProvider);
+    debugPrint('_loadCurrentStencil: $selectedStencil');
     if (selectedStencil != null) {
       await _loadStencilFromModel(selectedStencil);
     }
@@ -81,8 +84,33 @@ class _StencilOverlayWidgetState
   Widget build(BuildContext context) {
     final selectedStencil = ref.watch(selectedStencilProvider);
 
-    if (selectedStencil == null || _stencilImage == null) {
+    // 當剪影變化時，重新載入
+    ref.listen<StencilModel?>(selectedStencilProvider, (previous, next) {
+      debugPrint('Stencil changed: $previous -> $next');
+      if (next != null && next.id != previous?.id) {
+        _loadStencilFromModel(next);
+      }
+    });
+
+    // 如果沒有選擇剪影，不顯示
+    if (selectedStencil == null) {
       return const SizedBox.shrink();
+    }
+
+    // 如果剪影還沒載入，嘗試載入
+    if (_stencilImage == null && !_isLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadStencilFromModel(selectedStencil);
+      });
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    if (_stencilImage == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
     }
 
     return Positioned.fill(
