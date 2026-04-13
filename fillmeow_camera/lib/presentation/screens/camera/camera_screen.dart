@@ -1,0 +1,311 @@
+import 'dart:typed_data';
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/app_dimensions.dart';
+import '../../../providers/camera_provider.dart';
+import '../../../providers/editor_provider.dart';
+import 'widgets/camera_preview_widget.dart';
+import 'widgets/stencil_overlay_widget.dart';
+import 'widgets/camera_toolbar.dart';
+import 'widgets/capture_button.dart';
+
+/// 主相機頁面
+class CameraScreen extends ConsumerStatefulWidget {
+  const CameraScreen({super.key});
+
+  @override
+  ConsumerState<CameraScreen> createState() => _CameraScreenState();
+}
+
+class _CameraScreenState extends ConsumerState<CameraScreen>
+    with WidgetsBindingObserver {
+  bool _isCapturing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // 隱藏系統UI
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = ref.read(cameraControllerProvider).valueOrNull;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _captureImage() async {
+    if (_isCapturing) return;
+
+    final controller = ref.read(cameraControllerProvider).valueOrNull;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    setState(() => _isCapturing = true);
+
+    try {
+      // 檢查計時器
+      final timerSeconds = ref.read(timerSecondsProvider);
+      if (timerSeconds > 0) {
+        // 倒計時拍攝
+        for (int i = timerSeconds; i > 0; i--) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$i...'),
+              duration: const Duration(seconds: 1),
+              backgroundColor: Colors.black87,
+            ),
+          );
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+
+      // 拍攝圖片
+      final xFile = await controller.takePicture();
+      final bytes = await xFile.readAsBytes();
+
+      // 設置到編輯器
+      ref.read(editorStateProvider.notifier).setCapturedImage(bytes);
+
+      if (!mounted) return;
+
+      // 跳转到编辑页面
+      context.push('/editor');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('拍攝失敗: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isCapturing = false);
+      }
+    }
+  }
+
+  void _switchCamera() async {
+    final controller = ref.read(cameraControllerProvider).valueOrNull;
+    if (controller != null) {
+      await controller.dispose();
+    }
+
+    final currentIndex = ref.read(currentCameraIndexProvider);
+    final cameras = await ref.read(availableCamerasProvider.future);
+    
+    if (cameras.length > 1) {
+      ref.read(currentCameraIndexProvider.notifier).state =
+          (currentIndex + 1) % cameras.length;
+    }
+  }
+
+  void _toggleFlash() async {
+    final controller = ref.read(cameraControllerProvider).valueOrNull;
+    if (controller == null) return;
+
+    final currentMode = ref.read(flashModeProvider);
+    FlashMode newMode;
+
+    switch (currentMode) {
+      case FlashMode.off:
+        newMode = FlashMode.auto;
+        break;
+      case FlashMode.auto:
+        newMode = FlashMode.always;
+        break;
+      case FlashMode.always:
+        newMode = FlashMode.torch;
+        break;
+      case FlashMode.torch:
+        newMode = FlashMode.off;
+        break;
+    }
+
+    try {
+      await controller.setFlashMode(newMode);
+      ref.read(flashModeProvider.notifier).state = newMode;
+    } catch (e) {
+      // 忽略錯誤
+    }
+  }
+
+  void _toggleGrid() {
+    ref.read(showGridProvider.notifier).state =
+        !ref.read(showGridProvider);
+  }
+
+  void _openStencilPicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const StencilPickerSheet(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controllerAsync = ref.watch(cameraControllerProvider);
+    final showGrid = ref.watch(showGridProvider);
+
+    return Scaffold(
+      backgroundColor: AppColors.cameraBackground,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 相機預覽
+          controllerAsync.when(
+            data: (controller) {
+              if (controller == null) {
+                return const Center(
+                  child: Text(
+                    '無法訪問相機',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                );
+              }
+              return CameraPreviewWidget(
+                controller: controller,
+                showGrid: showGrid,
+              );
+            },
+            loading: () => const Center(
+              child: CircularProgressIndicator(
+                color: AppColors.primary,
+              ),
+            ),
+            error: (error, stack) => Center(
+              child: Text(
+                '相機錯誤: $error',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+
+          // 剪影疊加層
+          const StencilOverlayWidget(),
+
+          // 頂部工具列
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: CameraToolbar(
+                onSwitchCamera: _switchCamera,
+                onToggleFlash: _toggleFlash,
+                onToggleGrid: _toggleGrid,
+                onOpenSettings: () => context.push('/settings'),
+                showGrid: showGrid,
+              ),
+            ),
+          ),
+
+          // 底部控制列
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Container(
+                height: AppDimensions.bottomBarHeight,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimensions.spacingLg,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // 最後拍攝縮圖
+                    _buildThumbnail(),
+                    
+                    // 拍攝按鈕
+                    CaptureButton(
+                      onTap: _captureImage,
+                      isCapturing: _isCapturing,
+                    ),
+                    
+                    // 選貓按鈕
+                    _buildSelectCatButton(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThumbnail() {
+    final lastImage = ref.watch(lastCapturedImageProvider);
+
+    return GestureDetector(
+      onTap: lastImage != null ? () => context.push('/editor') : null,
+      child: Container(
+        width: AppDimensions.thumbnailSize,
+        height: AppDimensions.thumbnailSize,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+        child: lastImage != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(AppDimensions.radiusSm - 2),
+                child: Image.file(
+                  java.io.File(lastImage),
+                  fit: BoxFit.cover,
+                ),
+              )
+            : const Icon(
+                Icons.image,
+                color: Colors.white54,
+                size: 24,
+              ),
+      ),
+    );
+  }
+
+  Widget _buildSelectCatButton() {
+    return GestureDetector(
+      onTap: _openStencilPicker,
+      child: Container(
+        width: AppDimensions.thumbnailSize,
+        height: AppDimensions.thumbnailSize,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+          color: AppColors.surface,
+        ),
+        child: const Icon(
+          Icons.pets,
+          color: AppColors.primary,
+          size: 28,
+        ),
+      ),
+    );
+  }
+}
+
+// 臨時導入 dart:io
+import 'dart:io' as java;

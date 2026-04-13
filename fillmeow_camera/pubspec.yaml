@@ -1,0 +1,57 @@
+name: fillmeow_camera
+description: "填貓相機 - 用世界填出一隻貓"
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  
+  # State Management
+  flutter_riverpod: ^2.4.9
+  
+  # Navigation
+  go_router: ^13.1.0
+  
+  # Camera
+  camera: ^0.10.5+9
+  
+  # File & Storage
+  path_provider: ^2.1.2
+  path: ^1.8.3
+  share_plus: ^7.2.1
+  
+  # Image Processing
+  image: ^4.1.4
+  
+  # UI Components
+  flutter_colorpicker: ^1.0.3
+  
+  # Permissions
+  permission_handler: ^11.1.0
+  uuid: ^4.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/stencils/
+    - assets/images/
+  
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
