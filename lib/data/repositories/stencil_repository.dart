@@ -29,6 +29,14 @@ class StencilRepository {
 
   /// 預設剪影列表
   static final List<StencilModel> _defaultStencils = [
+    // 剪影系列（使用者提供的黑色剪影）
+    const StencilModel(
+      id: 'cat_silhouette',
+      name: '貓咪剪影',
+      category: 'silhouette',
+      assetPath: 'assets/stencils/cat_silhouette.png',
+    ),
+
     // 坐姿
     const StencilModel(
       id: 'sitting_01',

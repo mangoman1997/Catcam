@@ -1,12 +1,14 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/models/editor_state.dart';
 import '../../../../providers/editor_provider.dart';
 import '../../../../core/constants/app_colors.dart';
 
 /// 合成預覽組件
-class CompositePreview extends ConsumerWidget {
+class CompositePreview extends ConsumerStatefulWidget {
   final EditorState state;
 
   const CompositePreview({
@@ -15,57 +17,88 @@ class CompositePreview extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CompositePreview> createState() => _CompositePreviewState();
+}
+
+class _CompositePreviewState extends ConsumerState<CompositePreview> {
+  ui.Image? _stencilImage;
+  bool _imageLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStencilImage();
+  }
+
+  @override
+  void didUpdateWidget(CompositePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.selectedStencil?.assetPath != 
+        widget.state.selectedStencil?.assetPath) {
+      _loadStencilImage();
+    }
+  }
+
+  Future<void> _loadStencilImage() async {
+    if (widget.state.selectedStencil == null) {
+      setState(() {
+        _stencilImage = null;
+        _imageLoaded = false;
+      });
+      return;
+    }
+
+    try {
+      final assetPath = widget.state.selectedStencil!.assetPath;
+      final data = await DefaultAssetBundle.of(ref.context).load(assetPath);
+      final bytes = data.buffer.asUint8List();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      
+      if (mounted) {
+        setState(() {
+          _stencilImage = frame.image;
+          _imageLoaded = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load stencil: $e');
+      if (mounted) {
+        setState(() {
+          _stencilImage = null;
+          _imageLoaded = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editorState = widget.state;
+
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 拍攝的圖片
-        if (state.capturedImage != null)
-          Image.memory(
-            state.capturedImage!,
-            fit: BoxFit.cover,
-          ),
+        // 底層：背景色（剪影外部顯示這個顏色）
+        Container(color: AppColors.cameraBackground),
 
-        // 應用濾鏡
-        if (state.filterType != FilterType.none)
-          ColorFiltered(
-            colorFilter: _getColorFilter(state.filterType),
-            child: Container(),
-          ),
+        // 中間層：如果有剪影應用，顯示經過剪影遮罩的圖片
+        if (editorState.capturedImage != null)
+          _buildMaskedImage(editorState),
 
-        // 剪影疊加
-        if (state.selectedStencil != null)
-          Positioned(
-            left: MediaQuery.of(context).size.width / 2 -
-                150 * state.stencilScale +
-                state.stencilOffset.dx,
-            top: MediaQuery.of(context).size.height / 2 -
-                150 * state.stencilScale +
-                state.stencilOffset.dy,
-            child: Transform.scale(
-              scale: state.stencilScale,
-              child: Transform.rotate(
-                angle: state.stencilRotation,
-                child: state.isFlippedHorizontally
-                    ? Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()..scale(-1.0, 1.0),
-                        child: _buildStencil(state),
-                      )
-                    : _buildStencil(state),
-              ),
-            ),
-          ),
+        // 頂層：如果有剪影，顯示剪影輪廓線
+        if (_imageLoaded && editorState.selectedStencil != null)
+          _buildStencilOverlay(editorState),
 
         // 文字
-        if (state.hasText && state.textPosition != null)
+        if (editorState.hasText && editorState.textPosition != null)
           Positioned(
-            left: state.textPosition!.dx,
-            top: state.textPosition!.dy,
+            left: editorState.textPosition!.dx,
+            top: editorState.textPosition!.dy,
             child: Text(
-              state.text!,
+              editorState.text!,
               style: TextStyle(
-                color: state.textColor ?? Colors.white,
+                color: editorState.textColor ?? Colors.white,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
                 shadows: [
@@ -82,97 +115,120 @@ class CompositePreview extends ConsumerWidget {
     );
   }
 
-  Widget _buildStencil(EditorState state) {
+  /// 構建被剪影遮罩的圖片
+  Widget _buildMaskedImage(EditorState state) {
+    if (!_imageLoaded || _stencilImage == null) {
+      // 如果沒有剪影，直接顯示原圖
+      return Image.memory(
+        state.capturedImage!,
+        fit: BoxFit.cover,
+      );
+    }
+
+    // 使用剪影作為遮罩：黑色部分 = 顯示圖片，透明部分 = 顯示背景
+    return ShaderMask(
+      shaderCallback: (bounds) {
+        return ImageShader(
+          _stencilImage!,
+          TileMode.clamp,
+          TileMode.clamp,
+          Matrix4.identity().storage,
+        );
+      },
+      blendMode: BlendMode.dstIn,
+      child: Image.memory(
+        state.capturedImage!,
+        fit: BoxFit.cover,
+        width: bounds.width,
+        height: bounds.height,
+      ),
+    );
+  }
+
+  Size? get bounds => null;
+
+  /// 構建剪影輪廓線疊加
+  Widget _buildStencilOverlay(EditorState state) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    // 計算剪影位置（居中顯示）
+    final stencilSize = 300.0 * state.stencilScale;
+    final left = screenWidth / 2 - stencilSize / 2 + state.stencilOffset.dx;
+    final top = screenHeight / 2 - stencilSize / 2 + state.stencilOffset.dy;
+
+    Widget stencilWidget = Transform.scale(
+      scale: state.stencilScale,
+      child: Transform.rotate(
+        angle: state.stencilRotation,
+        child: state.isFlippedHorizontally
+            ? Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()..scale(-1.0, 1.0),
+                child: Image.asset(
+                  state.selectedStencil!.assetPath,
+                  width: 300,
+                  height: 300,
+                  fit: BoxFit.contain,
+                ),
+              )
+            : Image.asset(
+                state.selectedStencil!.assetPath,
+                width: 300,
+                height: 300,
+                fit: BoxFit.contain,
+              ),
+      ),
+    );
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: stencilWidget,
+    );
+  }
+}
+
+/// 疊加層：輪廓線和填色效果（可選）
+class _StencilOverlay extends ConsumerWidget {
+  final EditorState state;
+
+  const _StencilOverlay({required this.state});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (state.selectedStencil == null) return const SizedBox();
+
     return CustomPaint(
-      painter: _StencilPreviewPainter(
-        outlineColor: state.showOutline ? state.outlineColor : Colors.transparent,
-        outlineThickness: state.outlineThickness,
-        outlineStyle: state.outlineStyle,
+      painter: _StencilOutlinePainter(
+        color: state.showOutline ? state.outlineColor : Colors.transparent,
+        thickness: state.outlineThickness,
       ),
       size: const Size(300, 300),
     );
   }
-
-  ColorFilter _getColorFilter(FilterType type) {
-    switch (type) {
-      case FilterType.none:
-        return const ColorFilter.mode(Colors.transparent, BlendMode.dst);
-      case FilterType.blackAndWhite:
-        return const ColorFilter.matrix([
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case FilterType.warm:
-        return const ColorFilter.matrix([
-          1.2, 0, 0, 0, 0,
-          0, 1.1, 0, 0, 0,
-          0, 0, 0.9, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case FilterType.cool:
-        return const ColorFilter.matrix([
-          0.9, 0, 0, 0, 0,
-          0, 1.0, 0, 0, 0,
-          0, 0, 1.2, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case FilterType.vintage:
-        return const ColorFilter.matrix([
-          0.9, 0.1, 0.1, 0, 10,
-          0.1, 0.8, 0.1, 0, 10,
-          0.1, 0.1, 0.6, 0, 20,
-          0, 0, 0, 1, 0,
-        ]);
-      case FilterType.HDR:
-        return const ColorFilter.matrix([
-          1.3, 0, 0, 0, -20,
-          0, 1.3, 0, 0, -20,
-          0, 0, 1.3, 0, -20,
-          0, 0, 0, 1, 0,
-        ]);
-    }
-  }
 }
 
-class _StencilPreviewPainter extends CustomPainter {
-  final Color outlineColor;
-  final double outlineThickness;
-  final OutlineStyle outlineStyle;
+class _StencilOutlinePainter extends CustomPainter {
+  final Color color;
+  final double thickness;
 
-  _StencilPreviewPainter({
-    required this.outlineColor,
-    required this.outlineThickness,
-    required this.outlineStyle,
+  _StencilOutlinePainter({
+    required this.color,
+    required this.thickness,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (color == Colors.transparent || thickness == 0) return;
+
     final paint = Paint()
-      ..color = outlineColor
+      ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = outlineThickness
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
+      ..strokeWidth = thickness
+      ..strokeCap = StrokeCap.round;
 
-    if (outlineStyle == OutlineStyle.dashed) {
-      _drawDashedOval(
-        canvas,
-        Rect.fromCenter(
-          center: Offset(size.width / 2, size.height / 2),
-          width: 200,
-          height: 180,
-        ),
-        paint,
-      );
-    } else {
-      // 繪製貓咪形狀
-      _drawCatShape(canvas, size, paint);
-    }
-  }
-
-  void _drawCatShape(Canvas canvas, Size size, Paint paint) {
+    // 繪製貓咪形狀輪廓
     final center = Offset(size.width / 2, size.height / 2);
 
     // 頭部
@@ -220,30 +276,8 @@ class _StencilPreviewPainter extends CustomPainter {
     canvas.drawPath(tailPath, paint);
   }
 
-  void _drawDashedOval(Canvas canvas, Rect rect, Paint paint) {
-    const dashWidth = 10.0;
-    const dashSpace = 5.0;
-
-    // 實現虛線效果
-    final path = Path()..addOval(rect);
-    final pathMetrics = path.computeMetrics();
-
-    for (final metric in pathMetrics) {
-      double distance = 0;
-      while (distance < metric.length) {
-        final start = distance;
-        final end = (distance + dashWidth).clamp(0.0, metric.length);
-        final extractPath = metric.extractPath(start, end.toDouble());
-        canvas.drawPath(extractPath, paint);
-        distance += dashWidth + dashSpace;
-      }
-    }
-  }
-
   @override
-  bool shouldRepaint(covariant _StencilPreviewPainter oldDelegate) {
-    return oldDelegate.outlineColor != outlineColor ||
-        oldDelegate.outlineThickness != outlineThickness ||
-        oldDelegate.outlineStyle != outlineStyle;
+  bool shouldRepaint(covariant _StencilOutlinePainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.thickness != thickness;
   }
 }
