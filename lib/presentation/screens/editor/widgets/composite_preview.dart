@@ -187,21 +187,23 @@ class _CatCropPainter extends CustomPainter {
     final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
 
     // 使用 saveLayer + BlendMode.dstIn 來實現裁剪
-    // dstIn: 只保留目標（照片）在來源（剪影）有內容的區域
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
     
     // 第一層：照片
     canvas.saveLayer(rect, Paint());
-    canvas.drawImage(capturedImage, Offset(photoOffsetX, photoOffsetY), 
-        Paint()..scale(photoScale));
+    canvas.save();
+    canvas.translate(photoOffsetX, photoOffsetY);
+    canvas.scale(photoScale);
+    canvas.drawImage(capturedImage, Offset.zero, Paint());
+    canvas.restore();
     
     // 第二層：剪影，使用 dstIn 混合模式
-    // 黑色（貓咪）= 有內容 = 保留照片
-    // 透明 = 無內容 = 移除照片
     canvas.saveLayer(rect, Paint()..blendMode = BlendMode.dstIn);
+    canvas.save();
     canvas.translate(stencilOffsetX, stencilOffsetY);
     canvas.scale(stencilScale);
     canvas.drawImage(stencilImage, Offset.zero, Paint());
+    canvas.restore();
     canvas.restore(); // dstIn
     
     canvas.restore(); // 主 layer
