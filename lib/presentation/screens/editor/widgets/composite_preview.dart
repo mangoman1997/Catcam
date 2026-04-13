@@ -20,12 +20,14 @@ class CompositePreview extends ConsumerStatefulWidget {
 
 class _CompositePreviewState extends ConsumerState<CompositePreview> {
   ui.Image? _stencilImage;
-  bool _imageLoaded = false;
+  ui.Image? _capturedImage;
+  bool _imagesLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _loadStencilImage();
+    _loadCapturedImage();
   }
 
   @override
@@ -35,39 +37,63 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
         widget.state.selectedStencil?.assetPath) {
       _loadStencilImage();
     }
+    if (oldWidget.state.capturedImage != widget.state.capturedImage) {
+      _loadCapturedImage();
+    }
   }
 
   Future<void> _loadStencilImage() async {
     if (widget.state.selectedStencil == null) {
-      setState(() {
-        _stencilImage = null;
-        _imageLoaded = false;
-      });
+      setState(() => _updateLoadState());
       return;
     }
 
     try {
-      final assetPath = widget.state.selectedStencil!.assetPath;
-      final data = await DefaultAssetBundle.of(ref.context).load(assetPath);
+      final data = await DefaultAssetBundle.of(ref.context)
+          .load(widget.state.selectedStencil!.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       
       if (mounted) {
-        setState(() {
-          _stencilImage = frame.image;
-          _imageLoaded = true;
-        });
+        _stencilImage = frame.image;
+        _updateLoadState();
       }
     } catch (e) {
       debugPrint('Failed to load stencil: $e');
       if (mounted) {
-        setState(() {
-          _stencilImage = null;
-          _imageLoaded = false;
-        });
+        _stencilImage = null;
+        _updateLoadState();
       }
     }
+  }
+
+  Future<void> _loadCapturedImage() async {
+    if (widget.state.capturedImage == null) {
+      setState(() => _updateLoadState());
+      return;
+    }
+
+    try {
+      final bytes = widget.state.capturedImage!;
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      
+      if (mounted) {
+        _capturedImage = frame.image;
+        _updateLoadState();
+      }
+    } catch (e) {
+      debugPrint('Failed to load captured image: $e');
+      if (mounted) {
+        _capturedImage = null;
+        _updateLoadState();
+      }
+    }
+  }
+
+  void _updateLoadState() {
+    _imagesLoaded = _stencilImage != null && _capturedImage != null;
   }
 
   @override
@@ -109,94 +135,109 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
     );
   }
 
-  /// 構建圖片層
   Widget _buildImageLayer(EditorState state) {
-    Widget imageWidget = Image.memory(
-      state.capturedImage!,
-      fit: BoxFit.cover,
-    );
-
-    // 應用濾鏡
-    if (state.filterType != FilterType.none) {
-      imageWidget = ColorFiltered(
-        colorFilter: ColorFilter.matrix(_getFilterMatrix(state.filterType)),
-        child: imageWidget,
+    // 沒有剪影，直接顯示照片
+    if (!_imagesLoaded || _stencilImage == null || _capturedImage == null) {
+      Widget photoWidget = Image.memory(
+        state.capturedImage!,
+        fit: BoxFit.cover,
       );
-    }
-
-    // 如果有剪影，應用剪影遮罩
-    if (_imageLoaded && _stencilImage != null && state.selectedStencil != null) {
-      // dstIn: 只保留目標（照片）在來源（剪影）有內容的區域
-      // 黑色（貓咪）= 有內容 → 顯示照片
-      // 透明 = 無內容 → 隱藏照片
-      return ShaderMask(
-        shaderCallback: (bounds) {
-          return ImageShader(
-            _stencilImage!,
-            TileMode.clamp,
-            TileMode.clamp,
-            Matrix4.identity().storage,
-          );
-        },
-        blendMode: BlendMode.dstIn,
-        child: ColorFiltered(
+      
+      if (state.filterType != FilterType.none) {
+        photoWidget = ColorFiltered(
           colorFilter: ColorFilter.matrix(_getFilterMatrix(state.filterType)),
-          child: Image.memory(
-            state.capturedImage!,
-            fit: BoxFit.cover,
-          ),
-        ),
-      );
+          child: photoWidget,
+        );
+      }
+      return photoWidget;
     }
 
-    return imageWidget;
+    // 使用 CustomPaint 實現剪影遮罩
+    return CustomPaint(
+      painter: _CatMaskPainter(
+        stencilImage: _stencilImage!,
+        capturedImage: _capturedImage!,
+        filterType: state.filterType,
+      ),
+      size: Size.infinite,
+    );
   }
 
-  /// 獲取濾鏡矩陣
   List<double> _getFilterMatrix(FilterType type) {
     switch (type) {
       case FilterType.none:
-        return [
-          1, 0, 0, 0, 0,
-          0, 1, 0, 0, 0,
-          0, 0, 1, 0, 0,
-          0, 0, 0, 1, 0,
-        ];
+        return [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
       case FilterType.blackAndWhite:
-        return [
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0, 0, 0, 1, 0,
-        ];
+        return [0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0, 0, 0, 1, 0];
       case FilterType.warm:
-        return [
-          1.2, 0, 0, 0, 0,
-          0, 1.1, 0, 0, 0,
-          0, 0, 0.9, 0, 0,
-          0, 0, 0, 1, 0,
-        ];
+        return [1.2, 0, 0, 0, 0, 0, 1.1, 0, 0, 0, 0, 0, 0.9, 0, 0, 0, 0, 0, 1, 0];
       case FilterType.cool:
-        return [
-          0.9, 0, 0, 0, 0,
-          0, 1.0, 0, 0, 0,
-          0, 0, 1.2, 0, 0,
-          0, 0, 0, 1, 0,
-        ];
+        return [0.9, 0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 0, 1.2, 0, 0, 0, 0, 0, 1, 0];
       case FilterType.vintage:
-        return [
-          0.9, 0.1, 0.1, 0, 10,
-          0.1, 0.8, 0.1, 0, 10,
-          0.1, 0.1, 0.6, 0, 20,
-          0, 0, 0, 1, 0,
-        ];
+        return [0.9, 0.1, 0.1, 0, 10, 0.1, 0.8, 0.1, 0, 10, 0.1, 0.1, 0.6, 0, 20, 0, 0, 0, 1, 0];
       case FilterType.HDR:
-        return [
-          1.3, 0, 0, 0, -20,
-          0, 1.3, 0, 0, -20,
-          0, 0, 1.3, 0, -20,
-          0, 0, 0, 1, 0,
-        ];
+        return [1.3, 0, 0, 0, -20, 0, 1.3, 0, 0, -20, 0, 0, 1.3, 0, -20, 0, 0, 0, 1, 0];
     }
+  }
+}
+
+/// 貓咪形狀遮罩畫家
+class _CatMaskPainter extends CustomPainter {
+  final ui.Image stencilImage;
+  final ui.Image capturedImage;
+  final FilterType filterType;
+
+  _CatMaskPainter({
+    required this.stencilImage,
+    required this.capturedImage,
+    required this.filterType,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 計算照片的縮放和偏移（保持比例，填滿區域）
+    final photoScaleX = size.width / capturedImage.width;
+    final photoScaleY = size.height / capturedImage.height;
+    final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY; // 用較大的確保填滿
+    final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
+    final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
+
+    // 計算剪影的縮放和偏移
+    final stencilScaleX = size.width / stencilImage.width;
+    final stencilScaleY = size.height / stencilImage.height;
+    final stencilScale = stencilScaleX > stencilScaleY ? stencilScaleX : stencilScaleY;
+    final stencilOffsetX = (size.width - stencilImage.width * stencilScale) / 2;
+    final stencilOffsetY = (size.height - stencilImage.height * stencilScale) / 2;
+
+    // 使用 saveLayer 來正確應用混合模式
+    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+
+    // 繪製照片
+    canvas.save();
+    canvas.translate(photoOffsetX, photoOffsetY);
+    canvas.scale(photoScale);
+    canvas.drawImage(capturedImage, Offset.zero, Paint());
+    canvas.restore();
+
+    // 繪製剪影（使用 dstIn 只保留照片在剪影有內容的區域）
+    canvas.save();
+    canvas.translate(stencilOffsetX, stencilOffsetY);
+    canvas.scale(stencilScale);
+    
+    final maskPaint = Paint()
+      ..blendMode = BlendMode.dstIn
+      ..filterQuality = FilterQuality.high;
+    
+    canvas.drawImage(stencilImage, Offset.zero, maskPaint);
+    canvas.restore();
+
+    canvas.restore(); // 結束 saveLayer
+  }
+
+  @override
+  bool shouldRepaint(covariant _CatMaskPainter oldDelegate) {
+    return oldDelegate.stencilImage != stencilImage ||
+        oldDelegate.capturedImage != capturedImage ||
+        oldDelegate.filterType != filterType;
   }
 }
