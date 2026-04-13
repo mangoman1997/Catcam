@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/models/editor_state.dart';
 import '../../../../providers/editor_provider.dart';
@@ -43,39 +44,37 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
   }
 
   Future<void> _loadStencilImage() async {
-    debugPrint('_loadStencilImage called, selectedStencil: ${widget.state.selectedStencil?.name ?? "null"}');
-    
     if (widget.state.selectedStencil == null) {
-      debugPrint('No stencil selected, skipping load');
-      setState(() => _updateLoadState());
       return;
     }
 
     try {
-      debugPrint('Loading stencil from: ${widget.state.selectedStencil!.assetPath}');
-      final data = await DefaultAssetBundle.of(context)
-          .load(widget.state.selectedStencil!.assetPath);
+      debugPrint('Loading stencil: ${widget.state.selectedStencil!.assetPath}');
+      final data = await rootBundle.load(widget.state.selectedStencil!.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       debugPrint('Stencil loaded: ${frame.image.width}x${frame.image.height}');
       
       if (mounted) {
-        _stencilImage = frame.image;
-        _updateLoadState();
+        setState(() {
+          _stencilImage = frame.image;
+          _imagesLoaded = _stencilImage != null && _capturedImage != null;
+        });
       }
-    } catch (e) {
-      debugPrint('Failed to load stencil: $e');
+    } catch (e, stack) {
+      debugPrint('Failed to load stencil: $e\n$stack');
       if (mounted) {
-        _stencilImage = null;
-        _updateLoadState();
+        setState(() {
+          _stencilImage = null;
+          _imagesLoaded = _stencilImage != null && _capturedImage != null;
+        });
       }
     }
   }
 
   Future<void> _loadCapturedImage() async {
     if (widget.state.capturedImage == null) {
-      setState(() => _updateLoadState());
       return;
     }
 
@@ -83,27 +82,40 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
       final bytes = widget.state.capturedImage!;
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      debugPrint('Captured image loaded: ${frame.image.width}x${frame.image.height}');
       
       if (mounted) {
-        _capturedImage = frame.image;
-        _updateLoadState();
+        setState(() {
+          _capturedImage = frame.image;
+          _imagesLoaded = _stencilImage != null && _capturedImage != null;
+        });
       }
-    } catch (e) {
-      debugPrint('Failed to load captured image: $e');
+    } catch (e, stack) {
+      debugPrint('Failed to load captured image: $e\n$stack');
       if (mounted) {
-        _capturedImage = null;
-        _updateLoadState();
+        setState(() {
+          _capturedImage = null;
+          _imagesLoaded = _stencilImage != null && _capturedImage != null;
+        });
       }
     }
   }
 
   void _updateLoadState() {
-    _imagesLoaded = _stencilImage != null && _capturedImage != null;
+    // This is now handled inside load methods
   }
 
   @override
   Widget build(BuildContext context) {
     final editorState = widget.state;
+
+    // 確保圖片被載入
+    if (editorState.capturedImage != null && _capturedImage == null) {
+      _loadCapturedImage();
+    }
+    if (editorState.selectedStencil != null && _stencilImage == null) {
+      _loadStencilImage();
+    }
 
     // 沒有照片，顯示背景色
     if (editorState.capturedImage == null) {
