@@ -6,7 +6,6 @@ import '../../../../providers/stencil_provider.dart';
 import '../../../../core/constants/app_colors.dart';
 
 /// 剪影疊加組件 - 即時AR效果
-/// 只在貓咪形狀內顯示相機畫面，其他區域被遮罩
 class StencilOverlayWidget extends ConsumerStatefulWidget {
   const StencilOverlayWidget({super.key});
 
@@ -22,26 +21,26 @@ class _StencilOverlayWidgetState
   double _rotation = 0.0;
   bool _isFlipped = false;
   ui.Image? _stencilImage;
-  bool _imageLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    // 初始化時讀取狀態
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final state = ref.read(editorStateProvider);
-      setState(() {
-        _offset = state.stencilOffset;
-        _scale = state.stencilScale;
-        _rotation = state.stencilRotation;
-        _isFlipped = state.isFlippedHorizontally;
-      });
-      _loadStencil();
+      _loadCurrentStencil();
     });
   }
 
-  Future<void> _loadStencil() async {
+  Future<void> _loadCurrentStencil() async {
     final selectedStencil = ref.read(selectedStencilProvider);
-    if (selectedStencil == null) return;
+    if (selectedStencil == null) {
+      if (mounted && _stencilImage != null) {
+        setState(() => _stencilImage = null);
+      }
+      return;
+    }
+
+    debugPrint('Loading stencil: ${selectedStencil.assetPath}');
 
     try {
       final data = await DefaultAssetBundle.of(context).load(selectedStencil.assetPath);
@@ -49,14 +48,16 @@ class _StencilOverlayWidgetState
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       
+      debugPrint('Stencil loaded successfully: ${frame.image.width}x${frame.image.height}');
+      
       if (mounted) {
-        setState(() {
-          _stencilImage = frame.image;
-          _imageLoaded = true;
-        });
+        setState(() => _stencilImage = frame.image);
       }
     } catch (e) {
-      debugPrint('Failed to load stencil: $e');
+      debugPrint('ERROR loading stencil: $e');
+      if (mounted) {
+        setState(() => _stencilImage = null);
+      }
     }
   }
 
@@ -77,18 +78,38 @@ class _StencilOverlayWidgetState
   }
 
   void _onDoubleTap() {
-    setState(() {
-      _isFlipped = !_isFlipped;
-    });
+    setState(() => _isFlipped = !_isFlipped);
     ref.read(editorStateProvider.notifier).flipStencil();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 監聽剪影選擇
     final selectedStencil = ref.watch(selectedStencilProvider);
+    
+    // 當剪影變化時重新載入
+    ref.listen<StencilModel?>(selectedStencilProvider, (previous, next) {
+      debugPrint('Stencil changed from ${previous?.name} to ${next?.name}');
+      _loadCurrentStencil();
+    });
 
+    // 如果沒有選擇剪影，不顯示任何東西
     if (selectedStencil == null) {
+      debugPrint('No stencil selected');
       return const SizedBox.shrink();
+    }
+
+    // 如果剪影還沒載入，顯示載入中
+    if (_stencilImage == null) {
+      debugPrint('Stencil image not loaded yet');
+      return Positioned.fill(
+        child: Container(
+          color: Colors.transparent,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      );
     }
 
     return Positioned.fill(
@@ -96,85 +117,116 @@ class _StencilOverlayWidgetState
         onScaleStart: _onScaleStart,
         onScaleUpdate: _onScaleUpdate,
         onDoubleTap: _onDoubleTap,
-        child: _imageLoaded && _stencilImage != null
-            ? _buildARMaskOverlay()
-            : Container(color: Colors.transparent),
+        child: CustomPaint(
+          painter: _StencilMaskPainter(
+            stencilImage: _stencilImage!,
+            offset: _offset,
+            scale: _scale,
+            rotation: _rotation,
+            isFlipped: _isFlipped,
+            backgroundColor: AppColors.cameraBackground,
+          ),
+        ),
       ),
     );
   }
+}
 
-  /// 構建AR遮罩層
-  Widget _buildARMaskOverlay() {
-    final stencilSize = 300.0 * _scale;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    
-    final left = screenWidth / 2 - stencilSize / 2 + _offset.dx;
-    final top = screenHeight / 2 - stencilSize / 2 + _offset.dy;
+/// 剪影遮罩畫家
+class _StencilMaskPainter extends CustomPainter {
+  final ui.Image stencilImage;
+  final Offset offset;
+  final double scale;
+  final double rotation;
+  final bool isFlipped;
+  final Color backgroundColor;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 底層：遮罩色（覆蓋整個畫面）
-        Container(color: AppColors.cameraBackground),
+  _StencilMaskPainter({
+    required this.stencilImage,
+    required this.offset,
+    required this.scale,
+    required this.rotation,
+    required this.isFlipped,
+    required this.backgroundColor,
+  });
 
-        // 上層：只在剪影形狀內顯示（移除遮罩）
-        // 使用 BlendMode.dstIn
-        // dstIn: 只保留目標在來源有內容的區域
-        // 我們的剪影：黑色（貓咪）= 有內容，透明 = 無內容
-        // 所以結果：只在黑色（貓咪）區域顯示下面的相機
-        Positioned(
-          left: left,
-          top: top,
-          child: Transform.rotate(
-            angle: _rotation,
-            child: Transform.scale(
-              scale: _isFlipped ? -_scale : _scale,
-              alignment: Alignment.center,
-              child: ShaderMask(
-                shaderCallback: (bounds) {
-                  // 建立縮放矩陣
-                  final matrix = Matrix4.identity();
-                  matrix.scale(
-                    bounds.width / _stencilImage!.width,
-                    bounds.height / _stencilImage!.height,
-                  );
-                  return ImageShader(
-                    _stencilImage!,
-                    TileMode.clamp,
-                    TileMode.clamp,
-                    matrix.storage,
-                  );
-                },
-                blendMode: BlendMode.dstIn,
-                child: Container(
-                  width: stencilSize,
-                  height: stencilSize,
-                  // 白色：表示"顯示"區域
-                  // 黑色（貓咪）在剪影中 = 顯示相機
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 計算剪影位置和大小
+    const baseSize = 300.0;
+    final stencilSize = baseSize * scale;
+    final centerX = size.width / 2 + offset.dx;
+    final centerY = size.height / 2 + offset.dy;
 
-        // 頂層：白色邊框提示
-        Positioned(
-          left: left,
-          top: top,
-          child: Container(
-            width: stencilSize,
-            height: stencilSize,
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Colors.white.withOpacity(0.6),
-                width: 2,
-              ),
-            ),
-          ),
-        ),
-      ],
+    // 保存狀態
+    canvas.save();
+
+    // 移動到中心
+    canvas.translate(centerX, centerY);
+
+    // 應用翻轉
+    if (isFlipped) {
+      canvas.scale(-1.0, 1.0);
+    }
+
+    // 應用縮放
+    canvas.scale(scale);
+
+    // 應用旋轉
+    canvas.rotate(rotation);
+
+    // 移動回原點
+    canvas.translate(-centerX, -centerY);
+
+    // 繪製遮罩（覆蓋整個區域）
+    final maskRect = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawRect(maskRect, Paint()..color = backgroundColor);
+
+    // 使用 saveLayer 來應用混合模式
+    final stenicRect = Rect.fromCenter(
+      center: Offset(centerX, centerY),
+      width: baseSize,
+      height: baseSize,
     );
+
+    canvas.saveLayer(stenicRect, Paint());
+
+    // 繪製白色（會被移除的部分）
+    canvas.drawRect(stenicRect, Paint()..color = Colors.white);
+
+    // 繪製剪影（使用 dstOut 混合模式）
+    // 黑色(貓咪) = 有內容 = 從目標移除 = 透明
+    // 透明 = 無內容 = 保留目標 = 白色
+    final maskPaint = Paint()
+      ..blendMode = BlendMode.dstOut
+      ..filterQuality = FilterQuality.high;
+
+    canvas.drawImage(
+      stencilImage,
+      Offset(stenicRect.left, stenicRect.top),
+      maskPaint,
+    );
+
+    canvas.restore(); // 結束 saveLayer
+
+    // 繪製白色邊框
+    final borderPaint = Paint()
+      ..color = Colors.white.withOpacity(0.7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+
+    canvas.drawRect(stenicRect, borderPaint);
+
+    // 恢復狀態
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _StencilMaskPainter oldDelegate) {
+    return oldDelegate.stencilImage != stencilImage ||
+        oldDelegate.offset != offset ||
+        oldDelegate.scale != scale ||
+        oldDelegate.rotation != rotation ||
+        oldDelegate.isFlipped != isFlipped;
   }
 }
