@@ -5,7 +5,8 @@ import '../../../../providers/editor_provider.dart';
 import '../../../../providers/stencil_provider.dart';
 import '../../../../core/constants/app_colors.dart';
 
-/// 剪影疊加組件 - 在相機預覽上顯示剪影作為拍照引導
+/// 剪影疊加組件 - 即時AR效果
+/// 只在貓咪形狀內顯示相機畫面，其他區域被遮罩
 class StencilOverlayWidget extends ConsumerStatefulWidget {
   const StencilOverlayWidget({super.key});
 
@@ -96,129 +97,75 @@ class _StencilOverlayWidgetState
         onScaleUpdate: _onScaleUpdate,
         onDoubleTap: _onDoubleTap,
         child: _imageLoaded && _stencilImage != null
-            ? CustomPaint(
-                painter: _StencilGuidePainter(
-                  stencilImage: _stencilImage!,
-                  offset: _offset,
-                  scale: _scale,
-                  rotation: _rotation,
-                  isFlipped: _isFlipped,
-                ),
-              )
-            : Container(
-                color: Colors.transparent,
-              ),
+            ? _buildARMaskOverlay()
+            : Container(color: Colors.transparent),
       ),
     );
   }
-}
 
-/// 剪影引導畫家 - 顯示半透明填充的剪影形狀作為拍照引導
-class _StencilGuidePainter extends CustomPainter {
-  final ui.Image stencilImage;
-  final Offset offset;
-  final double scale;
-  final double rotation;
-  final bool isFlipped;
-
-  _StencilGuidePainter({
-    required this.stencilImage,
-    required this.offset,
-    required this.scale,
-    required this.rotation,
-    required this.isFlipped,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(
-      size.width / 2 + offset.dx,
-      size.height / 2 + offset.dy,
-    );
-
-    // 保存狀態
-    canvas.save();
-
-    // 移動到中心
-    canvas.translate(center.dx, center.dy);
-
-    // 應用翻轉
-    if (isFlipped) {
-      canvas.scale(-1.0, 1.0);
-    }
-
-    // 應用縮放
-    canvas.scale(scale);
-
-    // 應用旋轉
-    canvas.rotate(rotation);
-
-    // 移動回原點
-    canvas.translate(-center.dx, -center.dy);
-
-    // 計算目標區域
-    final stencilSize = 300.0;
-    final dstRect = Rect.fromCenter(
-      center: center,
-      width: stencilSize,
-      height: stencilSize,
-    );
-
-    // 方法1：繪製半透明填充的剪影（作為可見引導）
-    // 使用 srcATop 混合模式：只在剪影有內容的地方繪製
-    canvas.saveLayer(dstRect, Paint());
-
-    // 先填充一個半透明白色
-    final fillPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
-      ..style = PaintingStyle.fill;
+  /// 構建AR遮罩層
+  /// 黑色（貓咪）= 透明（顯示相機）
+  /// 透明 = 遮罩色（擋住相機）
+  Widget _buildARMaskOverlay() {
+    final stencilSize = 300.0 * _scale;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     
-    canvas.drawRect(dstRect, fillPaint);
+    final left = screenWidth / 2 - stencilSize / 2 + _offset.dx;
+    final top = screenHeight / 2 - stencilSize / 2 + _offset.dy;
 
-    // 然後用 dstIn 只保留剪影形狀內的白色
-    final maskPaint = Paint()
-      ..blendMode = BlendMode.dstIn
-      ..sourceImage = stencilImage
-      ..filterQuality = FilterQuality.high;
-    
-    canvas.drawImageRect(
-      stencilImage,
-      Rect.fromLTWH(0, 0, stencilImage.width.toDouble(), stencilImage.height.toDouble()),
-      Rect.fromLTWH(0, 0, stencilSize, stencilSize),
-      maskPaint,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 底層：遮罩色（擋住整個畫面）
+        Container(color: AppColors.cameraBackground),
+
+        // 上層：只在剪影形狀內"移除"遮罩（讓相機畫面通過）
+        // 使用 BlendMode.dstOut：shader 有內容的地方會從目標中移除
+        // 黑色（貓咪）= 有內容 = 移除遮罩 = 顯示相機
+        // 透明 = 無內容 = 保留遮罩 = 擋住相機
+        Transform.translate(
+          offset: Offset(left, top),
+          child: Transform.rotate(
+            angle: _rotation,
+            child: Transform.scale(
+              scale: _isFlipped ? -_scale : _scale,
+              child: ShaderMask(
+                shaderCallback: (bounds) {
+                  return ImageShader(
+                    _stencilImage!,
+                    TileMode.clamp,
+                    TileMode.clamp,
+                    Matrix4.identity().storage,
+                  );
+                },
+                blendMode: BlendMode.dstOut,
+                child: Container(
+                  width: stencilSize,
+                  height: stencilSize,
+                  color: Colors.white, // 白色會被移除
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // 頂層：白色邊框提示
+        Positioned(
+          left: left,
+          top: top,
+          child: Container(
+            width: stencilSize,
+            height: stencilSize,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.white.withOpacity(0.6),
+                width: 2,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
-
-    canvas.restore();
-
-    // 方法2：再繪製一個白色邊框
-    final borderPaint = Paint()
-      ..color = Colors.white.withOpacity(0.8)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0
-      ..sourceImage = stencilImage
-      ..filterQuality = FilterQuality.high;
-    
-    canvas.drawImageRect(
-      stencilImage,
-      Rect.fromLTWH(0, 0, stencilImage.width.toDouble(), stencilImage.height.toDouble()),
-      dstRect,
-      Paint()
-        ..blendMode = BlendMode.dstOut
-        ..sourceImage = stencilImage
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0,
-    );
-
-    // 恢復狀態
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _StencilGuidePainter oldDelegate) {
-    return oldDelegate.offset != offset ||
-        oldDelegate.scale != scale ||
-        oldDelegate.rotation != rotation ||
-        oldDelegate.isFlipped != isFlipped ||
-        oldDelegate.stencilImage != stencilImage;
   }
 }
