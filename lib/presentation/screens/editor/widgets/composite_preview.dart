@@ -5,7 +5,7 @@ import '../../../../data/models/editor_state.dart';
 import '../../../../providers/editor_provider.dart';
 import '../../../../core/constants/app_colors.dart';
 
-/// 合成預覽組件
+/// 合成預覽組件 - 只保留貓咪形狀內的照片
 class CompositePreview extends ConsumerStatefulWidget {
   final EditorState state;
 
@@ -49,7 +49,7 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
     }
 
     try {
-      final data = await DefaultAssetBundle.of(ref.context)
+      final data = await DefaultAssetBundle.of(context)
           .load(widget.state.selectedStencil!.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
@@ -100,66 +100,87 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
   Widget build(BuildContext context) {
     final editorState = widget.state;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 底層：背景色
-        Container(color: AppColors.cameraBackground),
+    // 沒有照片，顯示背景色
+    if (editorState.capturedImage == null) {
+      return Container(color: AppColors.cameraBackground);
+    }
 
-        // 圖片層
-        if (editorState.capturedImage != null)
-          _buildImageLayer(editorState),
-
-        // 文字
-        if (editorState.hasText && editorState.textPosition != null)
-          Positioned(
-            left: editorState.textPosition!.dx,
-            top: editorState.textPosition!.dy,
-            child: Text(
-              editorState.text!,
-              style: TextStyle(
-                color: editorState.textColor ?? Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                shadows: [
-                  Shadow(
-                    color: Colors.black.withOpacity(0.5),
-                    blurRadius: 4,
-                    offset: const Offset(2, 2),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildImageLayer(EditorState state) {
     // 沒有剪影，直接顯示照片
     if (!_imagesLoaded || _stencilImage == null || _capturedImage == null) {
       Widget photoWidget = Image.memory(
-        state.capturedImage!,
+        editorState.capturedImage!,
         fit: BoxFit.cover,
       );
       
-      if (state.filterType != FilterType.none) {
+      if (editorState.filterType != FilterType.none) {
         photoWidget = ColorFiltered(
-          colorFilter: ColorFilter.matrix(_getFilterMatrix(state.filterType)),
+          colorFilter: ColorFilter.matrix(_getFilterMatrix(editorState.filterType)),
           child: photoWidget,
         );
       }
       return photoWidget;
     }
 
-    // 使用 CustomPaint 實現剪影遮罩
-    return CustomPaint(
-      painter: _CatMaskPainter(
-        stencilImage: _stencilImage!,
-        capturedImage: _capturedImage!,
-        filterType: state.filterType,
-      ),
-      size: Size.infinite,
+    // 有剪影：使用 ShaderMask 只顯示貓咪形狀內的照片
+    return _buildCatShapedPreview();
+  }
+
+  Widget _buildCatShapedPreview() {
+    final editorState = ref.watch(editorStateProvider);
+    
+    // 計算縮放
+    final stencilSize = 300.0 * editorState.stencilScale;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    final left = (screenWidth - stencilSize) / 2 + editorState.stencilOffset.dx;
+    final top = (screenHeight - stencilSize) / 2 + editorState.stencilOffset.dy;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 底層：透明背景
+        Container(color: Colors.transparent),
+
+        // 上層：只在剪影形狀內顯示照片
+        // 使用 ShaderMask + ImageShader
+        Positioned(
+          left: left,
+          top: top,
+          child: Transform.rotate(
+            angle: editorState.stencilRotation,
+            child: Transform.scale(
+              scale: editorState.isFlippedHorizontally ? -editorState.stencilScale : editorState.stencilScale,
+              alignment: Alignment.center,
+              child: ShaderMask(
+                shaderCallback: (bounds) {
+                  // 建立圖片著色器
+                  // stencil 的黑色區域 = 高透明度 = 顯示
+                  // stencil 的透明區域 = 低透明度 = 隱藏
+                  final matrix = Matrix4.identity();
+                  matrix.scale(
+                    bounds.width / _stencilImage!.width,
+                    bounds.height / _stencilImage!.height,
+                  );
+                  return ImageShader(
+                    _stencilImage!,
+                    TileMode.clamp,
+                    TileMode.clamp,
+                    matrix.storage,
+                  );
+                },
+                blendMode: BlendMode.dstIn,
+                child: Image.memory(
+                  widget.state.capturedImage!,
+                  fit: BoxFit.cover,
+                  width: stencilSize,
+                  height: stencilSize,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -178,66 +199,5 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
       case FilterType.HDR:
         return [1.3, 0, 0, 0, -20, 0, 1.3, 0, 0, -20, 0, 0, 1.3, 0, -20, 0, 0, 0, 1, 0];
     }
-  }
-}
-
-/// 貓咪形狀遮罩畫家
-class _CatMaskPainter extends CustomPainter {
-  final ui.Image stencilImage;
-  final ui.Image capturedImage;
-  final FilterType filterType;
-
-  _CatMaskPainter({
-    required this.stencilImage,
-    required this.capturedImage,
-    required this.filterType,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // 計算照片的縮放和偏移（保持比例，填滿區域）
-    final photoScaleX = size.width / capturedImage.width;
-    final photoScaleY = size.height / capturedImage.height;
-    final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY; // 用較大的確保填滿
-    final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
-    final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
-
-    // 計算剪影的縮放和偏移
-    final stencilScaleX = size.width / stencilImage.width;
-    final stencilScaleY = size.height / stencilImage.height;
-    final stencilScale = stencilScaleX > stencilScaleY ? stencilScaleX : stencilScaleY;
-    final stencilOffsetX = (size.width - stencilImage.width * stencilScale) / 2;
-    final stencilOffsetY = (size.height - stencilImage.height * stencilScale) / 2;
-
-    // 使用 saveLayer 來正確應用混合模式
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-
-    // 繪製照片
-    canvas.save();
-    canvas.translate(photoOffsetX, photoOffsetY);
-    canvas.scale(photoScale);
-    canvas.drawImage(capturedImage, Offset.zero, Paint());
-    canvas.restore();
-
-    // 繪製剪影（使用 dstIn 只保留照片在剪影有內容的區域）
-    canvas.save();
-    canvas.translate(stencilOffsetX, stencilOffsetY);
-    canvas.scale(stencilScale);
-    
-    final maskPaint = Paint()
-      ..blendMode = BlendMode.dstIn
-      ..filterQuality = FilterQuality.high;
-    
-    canvas.drawImage(stencilImage, Offset.zero, maskPaint);
-    canvas.restore();
-
-    canvas.restore(); // 結束 saveLayer
-  }
-
-  @override
-  bool shouldRepaint(covariant _CatMaskPainter oldDelegate) {
-    return oldDelegate.stencilImage != stencilImage ||
-        oldDelegate.capturedImage != capturedImage ||
-        oldDelegate.filterType != filterType;
   }
 }
