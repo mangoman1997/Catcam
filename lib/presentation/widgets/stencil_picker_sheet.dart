@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
@@ -50,7 +51,7 @@ class StencilPickerSheet extends ConsumerWidget {
                   '選擇剪影',
                   style: AppTypography.h4,
                 ),
-                const SizedBox(width: 48), // 佔位
+                const SizedBox(width: 48),
               ],
             ),
           ),
@@ -178,13 +179,11 @@ class _StencilGridItem extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 剪影預覽
+            // 剪影預覽 - 顯示真實圖片
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(AppDimensions.spacingMd),
-                child: CustomPaint(
-                  painter: _CatStencilPainter(),
-                ),
+                child: _StencilImage(assetPath: stencil.assetPath),
               ),
             ),
 
@@ -193,43 +192,21 @@ class _StencilGridItem extends StatelessWidget {
               bottom: AppDimensions.spacingXs,
               left: 0,
               right: 0,
-              child: Text(
-                stencil.name,
-                textAlign: TextAlign.center,
-                style: AppTypography.caption.copyWith(
-                  color: isSelected
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  stencil.name,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.caption.copyWith(
+                    color: isSelected
+                        ? AppColors.primary
+                        : AppColors.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
-
-            // Premium 標記
-            if (stencil.isPremium)
-              Positioned(
-                top: AppDimensions.spacingXs,
-                right: AppDimensions.spacingXs,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'PRO',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -237,52 +214,96 @@ class _StencilGridItem extends StatelessWidget {
   }
 }
 
-class _CatStencilPainter extends CustomPainter {
+/// 載入並顯示剪影圖片
+class _StencilImage extends StatefulWidget {
+  final String assetPath;
+
+  const _StencilImage({required this.assetPath});
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.textSecondary.withOpacity(0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
+  State<_StencilImage> createState() => _StencilImageState();
+}
 
-    final center = Offset(size.width / 2, size.height / 2);
+class _StencilImageState extends State<_StencilImage> {
+  ui.Image? _image;
+  bool _loaded = false;
 
-    // 頭部
-    canvas.drawCircle(
-      Offset(center.dx, center.dy - size.height * 0.15),
-      size.width * 0.3,
-      paint,
-    );
+  @override
+  void initState() {
+    super.initState();
+    _loadImage();
+  }
 
-    // 身體
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + size.height * 0.2),
-        width: size.width * 0.7,
-        height: size.height * 0.5,
-      ),
-      paint,
-    );
-
-    // 左耳
-    final leftEarPath = Path()
-      ..moveTo(center.dx - size.width * 0.25, center.dy - size.height * 0.3)
-      ..lineTo(center.dx - size.width * 0.3, center.dy - size.height * 0.55)
-      ..lineTo(center.dx - size.width * 0.1, center.dy - size.height * 0.35)
-      ..close();
-    canvas.drawPath(leftEarPath, paint);
-
-    // 右耳
-    final rightEarPath = Path()
-      ..moveTo(center.dx + size.width * 0.25, center.dy - size.height * 0.3)
-      ..lineTo(center.dx + size.width * 0.3, center.dy - size.height * 0.55)
-      ..lineTo(center.dx + size.width * 0.1, center.dy - size.height * 0.35)
-      ..close();
-    canvas.drawPath(rightEarPath, paint);
+  Future<void> _loadImage() async {
+    try {
+      final data = await DefaultAssetBundle.of(context).load(widget.assetPath);
+      final bytes = data.buffer.asUint8List();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      
+      if (mounted) {
+        setState(() {
+          _image = frame.image;
+          _loaded = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load stencil image: $e');
+    }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) {
+    if (!_loaded || _image == null) {
+      // 載入中顯示 placeholder
+      return Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(
+          color: AppColors.outlineLight.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return CustomPaint(
+      painter: _StencilPainter(_image!),
+      size: const Size(80, 80),
+    );
+  }
+}
+
+class _StencilPainter extends CustomPainter {
+  final ui.Image image;
+
+  _StencilPainter(this.image);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 計算縮放比例，使圖片完整顯示在区域内
+    final scaleX = size.width / image.width;
+    final scaleY = size.height / image.height;
+    final scale = scaleX < scaleY ? scaleX : scaleY;
+    
+    final offsetX = (size.width - image.width * scale) / 2;
+    final offsetY = (size.height - image.height * scale) / 2;
+
+    canvas.save();
+    canvas.translate(offsetX, offsetY);
+    canvas.scale(scale);
+    canvas.drawImage(image, Offset.zero, Paint());
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _StencilPainter oldDelegate) {
+    return oldDelegate.image != image;
+  }
 }

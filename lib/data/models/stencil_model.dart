@@ -77,6 +77,7 @@ class StencilModel {
 /// 剪影分類
 enum StencilCategory {
   all('全部', 'all'),
+  silhouette('剪影', 'silhouette'),
   sitting('坐姿', 'sitting'),
   standing('站立', 'standing'),
   lying('躺臥', 'lying'),
