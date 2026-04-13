@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
@@ -24,20 +26,130 @@ class EditorScreen extends ConsumerStatefulWidget {
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
   int _selectedTab = 0;
+  bool _isSaving = false;
+
+  Future<Uint8List?> _renderImageWithMask(EditorState state) async {
+    if (state.capturedImage == null) return null;
+
+    try {
+      // 載入剪影圖
+      ui.Image? stencilImage;
+      if (state.selectedStencil != null) {
+        final data = await DefaultAssetBundle.of(ref.context)
+            .load(state.selectedStencil!.assetPath);
+        final bytes = data.buffer.asUint8List();
+        final codec = await ui.instantiateImageCodec(bytes);
+        stencilImage = (await codec.getNextFrame()).image;
+      }
+
+      // 載入拍攝的照片
+      final capturedCodec = await ui.instantiateImageCodec(state.capturedImage!);
+      final capturedImage = (await capturedCodec.getNextFrame()).image;
+
+      // 創建輸出圖片
+      final size = Size(
+        capturedImage.width.toDouble(),
+        capturedImage.height.toDouble(),
+      );
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+
+      // 繪製背景色
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = AppColors.cameraBackground,
+      );
+
+      // 如果有剪影，應用遮罩
+      if (stencilImage != null) {
+        // 計算縮放比例
+        final stencilScaleX = size.width / stencilImage.width;
+        final stencilScaleY = size.height / stencilImage.height;
+        final stencilScale = stencilScaleX > stencilScaleY ? stencilScaleX : stencilScaleY;
+        final stencilOffsetX = (size.width - stencilImage.width * stencilScale) / 2;
+        final stencilOffsetY = (size.height - stencilImage.height * stencilScale) / 2;
+
+        // 使用 saveLayer 應用混合模式
+        canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+
+        // 繪製照片
+        final photoScaleX = size.width / capturedImage.width;
+        final photoScaleY = size.height / capturedImage.height;
+        final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY;
+        final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
+        final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
+
+        canvas.save();
+        canvas.translate(photoOffsetX, photoOffsetY);
+        canvas.scale(photoScale);
+        canvas.drawImage(capturedImage, Offset.zero, Paint());
+        canvas.restore();
+
+        // 應用剪影遮罩
+        canvas.save();
+        canvas.translate(stencilOffsetX, stencilOffsetY);
+        canvas.scale(stencilScale);
+        
+        final maskPaint = Paint()
+          ..blendMode = BlendMode.dstIn
+          ..filterQuality = FilterQuality.high;
+        
+        canvas.drawImage(stencilImage, Offset.zero, maskPaint);
+        canvas.restore();
+
+        canvas.restore(); // 結束 saveLayer
+      } else {
+        // 沒有剪影，直接繪製照片
+        final photoScaleX = size.width / capturedImage.width;
+        final photoScaleY = size.height / capturedImage.height;
+        final photoScale = photoScaleX > photoScaleY ? photoScaleX : photoScaleY;
+        final photoOffsetX = (size.width - capturedImage.width * photoScale) / 2;
+        final photoOffsetY = (size.height - capturedImage.height * photoScale) / 2;
+
+        canvas.save();
+        canvas.translate(photoOffsetX, photoOffsetY);
+        canvas.scale(photoScale);
+        canvas.drawImage(capturedImage, Offset.zero, Paint());
+        canvas.restore();
+      }
+
+      // 編碼為 PNG
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(size.width.toInt(), size.height.toInt());
+      final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+      
+      return byteData?.buffer.asUint8List();
+    } catch (e) {
+      debugPrint('Failed to render image: $e');
+      return null;
+    }
+  }
 
   Future<void> _saveImage() async {
+    if (_isSaving) return;
+
+    setState(() => _isSaving = true);
+
     try {
       final state = ref.read(editorStateProvider);
       if (state.capturedImage == null) return;
 
+      // 渲染帶有剪影效果的圖片
+      final imageBytes = await _renderImageWithMask(state);
+
+      if (imageBytes == null) {
+        throw Exception('渲染圖片失敗');
+      }
+
       // 獲取臨時目錄
       final tempDir = await getTemporaryDirectory();
-      final fileName = 'fillmeow_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = 'fillmeow_${DateTime.now().millisecondsSinceEpoch}.png';
       final filePath = '${tempDir.path}/$fileName';
 
-      // 保存圖片（實際項目中需要應用合成）
+      // 保存圖片
       final file = File(filePath);
-      await file.writeAsBytes(state.capturedImage!);
+      await file.writeAsBytes(imageBytes);
 
       if (!mounted) return;
 
@@ -61,6 +173,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           backgroundColor: AppColors.error,
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -103,14 +219,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: _saveImage,
-            child: const Text(
-              '保存',
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            onPressed: _isSaving ? null : _saveImage,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text(
+                    '保存',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
         ],
       ),
