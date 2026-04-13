@@ -5,7 +5,7 @@ import 'app_colors.dart';
 class AppTypography {
   AppTypography._();
 
-  static const String fontFamily = 'Poppins';
+  static const String fontFamily = 'Roboto';
 
   // Headings
   static const TextStyle h1 = TextStyle(
