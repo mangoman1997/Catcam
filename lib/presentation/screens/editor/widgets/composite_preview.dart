@@ -105,12 +105,6 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
   Widget build(BuildContext context) {
     final editorState = widget.state;
 
-    debugPrint('CompositePreview.build: capturedImage=${editorState.capturedImage != null}, '
-        'selectedStencil=${editorState.selectedStencil?.name ?? "null"}, '
-        'stencilImage=${_stencilImage != null}, '
-        'capturedImageLoaded=${_capturedImage != null}, '
-        'imagesLoaded=$_imagesLoaded');
-
     // 沒有照片，顯示背景色
     if (editorState.capturedImage == null) {
       return Container(color: AppColors.cameraBackground);
@@ -118,15 +112,35 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
 
     // 沒有剪影，直接顯示照片
     if (!_imagesLoaded || _stencilImage == null || _capturedImage == null) {
-      debugPrint('Showing raw image (no stencil applied)');
-      return Image.memory(
-        editorState.capturedImage!,
-        fit: BoxFit.cover,
+      // 顯示調試信息
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.memory(
+            editorState.capturedImage!,
+            fit: BoxFit.cover,
+          ),
+          // 顯示調試覆蓋
+          Positioned(
+            top: 10,
+            left: 10,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.black54,
+              child: Text(
+                'DEBUG:\n'
+                'selectedStencil: ${editorState.selectedStencil?.name ?? "null"}\n'
+                'stencilImage: ${_stencilImage != null}\n'
+                'capturedImage: ${_capturedImage != null}',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
     // 有剪影：把照片裁剪成貓咪形狀
-    debugPrint('Applying cat stencil mask!');
     return _CatCropWidget(
       stencilImage: _stencilImage!,
       capturedImage: _capturedImage!,
