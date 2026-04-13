@@ -42,14 +42,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final controller = ref.read(cameraControllerProvider).valueOrNull;
-    if (controller == null || !controller.value.isInitialized) {
-      return;
-    }
-
-    if (state == AppLifecycleState.inactive) {
-      controller.dispose();
-    }
+    // 不要在這裡 dispose 相機！否則打開底部面板會導致相機失效
+    // 相機應該在 dispose() 方法中統一管理
   }
 
   Future<void> _captureImage() async {
