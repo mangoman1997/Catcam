@@ -1,7 +1,5 @@
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/models/editor_state.dart';
 import '../../../../providers/editor_provider.dart';
@@ -79,16 +77,12 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 底層：背景色（剪影外部顯示這個顏色）
+        // 底層：背景色
         Container(color: AppColors.cameraBackground),
 
-        // 中間層：如果有剪影應用，顯示經過剪影遮罩的圖片
+        // 圖片層
         if (editorState.capturedImage != null)
-          _buildMaskedImage(editorState),
-
-        // 頂層：如果有剪影，顯示剪影輪廓線
-        if (_imageLoaded && editorState.selectedStencil != null)
-          _buildStencilOverlay(editorState),
+          _buildImageLayer(editorState),
 
         // 文字
         if (editorState.hasText && editorState.textPosition != null)
@@ -115,169 +109,88 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
     );
   }
 
-  /// 構建被剪影遮罩的圖片
-  Widget _buildMaskedImage(EditorState state) {
-    if (!_imageLoaded || _stencilImage == null) {
-      // 如果沒有剪影，直接顯示原圖
-      return Image.memory(
-        state.capturedImage!,
-        fit: BoxFit.cover,
+  /// 構建圖片層
+  Widget _buildImageLayer(EditorState state) {
+    Widget imageWidget = Image.memory(
+      state.capturedImage!,
+      fit: BoxFit.cover,
+    );
+
+    // 應用濾鏡
+    if (state.filterType != FilterType.none) {
+      imageWidget = ColorFiltered(
+        colorFilter: ColorFilter.matrix(_getFilterMatrix(state.filterType)),
+        child: imageWidget,
       );
     }
 
-    // 使用剪影作為遮罩：黑色部分 = 顯示圖片，透明部分 = 顯示背景
-    return ShaderMask(
-      shaderCallback: (bounds) {
-        return ImageShader(
-          _stencilImage!,
-          TileMode.clamp,
-          TileMode.clamp,
-          Matrix4.identity().storage,
-        );
-      },
-      blendMode: BlendMode.dstIn,
-      child: Image.memory(
-        state.capturedImage!,
-        fit: BoxFit.cover,
-        width: bounds.width,
-        height: bounds.height,
-      ),
-    );
-  }
-
-  Size? get bounds => null;
-
-  /// 構建剪影輪廓線疊加
-  Widget _buildStencilOverlay(EditorState state) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    
-    // 計算剪影位置（居中顯示）
-    final stencilSize = 300.0 * state.stencilScale;
-    final left = screenWidth / 2 - stencilSize / 2 + state.stencilOffset.dx;
-    final top = screenHeight / 2 - stencilSize / 2 + state.stencilOffset.dy;
-
-    Widget stencilWidget = Transform.scale(
-      scale: state.stencilScale,
-      child: Transform.rotate(
-        angle: state.stencilRotation,
-        child: state.isFlippedHorizontally
-            ? Transform(
-                alignment: Alignment.center,
-                transform: Matrix4.identity()..scale(-1.0, 1.0),
-                child: Image.asset(
-                  state.selectedStencil!.assetPath,
-                  width: 300,
-                  height: 300,
-                  fit: BoxFit.contain,
-                ),
-              )
-            : Image.asset(
-                state.selectedStencil!.assetPath,
-                width: 300,
-                height: 300,
-                fit: BoxFit.contain,
-              ),
-      ),
-    );
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: stencilWidget,
-    );
-  }
-}
-
-/// 疊加層：輪廓線和填色效果（可選）
-class _StencilOverlay extends ConsumerWidget {
-  final EditorState state;
-
-  const _StencilOverlay({required this.state});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (state.selectedStencil == null) return const SizedBox();
-
-    return CustomPaint(
-      painter: _StencilOutlinePainter(
-        color: state.showOutline ? state.outlineColor : Colors.transparent,
-        thickness: state.outlineThickness,
-      ),
-      size: const Size(300, 300),
-    );
-  }
-}
-
-class _StencilOutlinePainter extends CustomPainter {
-  final Color color;
-  final double thickness;
-
-  _StencilOutlinePainter({
-    required this.color,
-    required this.thickness,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (color == Colors.transparent || thickness == 0) return;
-
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = thickness
-      ..strokeCap = StrokeCap.round;
-
-    // 繪製貓咪形狀輪廓
-    final center = Offset(size.width / 2, size.height / 2);
-
-    // 頭部
-    canvas.drawCircle(
-      Offset(center.dx, center.dy - 20),
-      60,
-      paint,
-    );
-
-    // 身體
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + 60),
-        width: 140,
-        height: 100,
-      ),
-      paint,
-    );
-
-    // 左耳
-    final leftEarPath = Path()
-      ..moveTo(center.dx - 45, center.dy - 55)
-      ..lineTo(center.dx - 55, center.dy - 100)
-      ..lineTo(center.dx - 20, center.dy - 60)
-      ..close();
-    canvas.drawPath(leftEarPath, paint);
-
-    // 右耳
-    final rightEarPath = Path()
-      ..moveTo(center.dx + 45, center.dy - 55)
-      ..lineTo(center.dx + 55, center.dy - 100)
-      ..lineTo(center.dx + 20, center.dy - 60)
-      ..close();
-    canvas.drawPath(rightEarPath, paint);
-
-    // 尾巴
-    final tailPath = Path()
-      ..moveTo(center.dx + 70, center.dy + 90)
-      ..quadraticBezierTo(
-        center.dx + 120,
-        center.dy + 60,
-        center.dx + 100,
-        center.dy + 10,
+    // 如果有剪影，應用剪影遮罩
+    if (_imageLoaded && _stencilImage != null && state.selectedStencil != null) {
+      // 使用 BlendMode.dstIn：保留目標（圖片）只在前景（剪影）有內容的區域
+      // 黑色剪影 = 有內容 = 顯示圖片
+      // 透明區域 = 無內容 = 隱藏圖片
+      return ShaderMask(
+        shaders: [
+          ImageShader(
+            _stencilImage!,
+            TileMode.clamp,
+            TileMode.clamp,
+            Matrix4.identity().storage,
+          ),
+        ],
+        blendMode: BlendMode.dstIn,
+        child: imageWidget,
       );
-    canvas.drawPath(tailPath, paint);
+    }
+
+    return imageWidget;
   }
 
-  @override
-  bool shouldRepaint(covariant _StencilOutlinePainter oldDelegate) {
-    return oldDelegate.color != color || oldDelegate.thickness != thickness;
+  /// 獲取濾鏡矩陣
+  List<double> _getFilterMatrix(FilterType type) {
+    switch (type) {
+      case FilterType.none:
+        return [
+          1, 0, 0, 0, 0,
+          0, 1, 0, 0, 0,
+          0, 0, 1, 0, 0,
+          0, 0, 0, 1, 0,
+        ];
+      case FilterType.blackAndWhite:
+        return [
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0, 0, 0, 1, 0,
+        ];
+      case FilterType.warm:
+        return [
+          1.2, 0, 0, 0, 0,
+          0, 1.1, 0, 0, 0,
+          0, 0, 0.9, 0, 0,
+          0, 0, 0, 1, 0,
+        ];
+      case FilterType.cool:
+        return [
+          0.9, 0, 0, 0, 0,
+          0, 1.0, 0, 0, 0,
+          0, 0, 1.2, 0, 0,
+          0, 0, 0, 1, 0,
+        ];
+      case FilterType.vintage:
+        return [
+          0.9, 0.1, 0.1, 0, 10,
+          0.1, 0.8, 0.1, 0, 10,
+          0.1, 0.1, 0.6, 0, 20,
+          0, 0, 0, 1, 0,
+        ];
+      case FilterType.HDR:
+        return [
+          1.3, 0, 0, 0, -20,
+          0, 1.3, 0, 0, -20,
+          0, 0, 1.3, 0, -20,
+          0, 0, 0, 1, 0,
+        ];
+    }
   }
 }
