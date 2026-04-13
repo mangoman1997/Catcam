@@ -130,14 +130,14 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
       // 黑色剪影 = 有內容 = 顯示圖片
       // 透明區域 = 無內容 = 隱藏圖片
       return ShaderMask(
-        shaders: [
-          ImageShader(
+        shaderCallback: (bounds) {
+          return ImageShader(
             _stencilImage!,
             TileMode.clamp,
             TileMode.clamp,
             Matrix4.identity().storage,
-          ),
-        ],
+          );
+        },
         blendMode: BlendMode.dstIn,
         child: imageWidget,
       );
