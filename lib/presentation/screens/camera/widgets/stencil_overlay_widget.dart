@@ -104,8 +104,6 @@ class _StencilOverlayWidgetState
   }
 
   /// 構建AR遮罩層
-  /// 黑色（貓咪）= 透明（顯示相機）
-  /// 透明 = 遮罩色（擋住相機）
   Widget _buildARMaskOverlay() {
     final stencilSize = 300.0 * _scale;
     final screenWidth = MediaQuery.of(context).size.width;
@@ -117,33 +115,44 @@ class _StencilOverlayWidgetState
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 底層：遮罩色（擋住整個畫面）
+        // 底層：遮罩色（覆蓋整個畫面）
         Container(color: AppColors.cameraBackground),
 
-        // 上層：只在剪影形狀內"移除"遮罩（讓相機畫面通過）
-        // 使用 BlendMode.dstOut：shader 有內容的地方會從目標中移除
-        // 黑色（貓咪）= 有內容 = 移除遮罩 = 顯示相機
-        // 透明 = 無內容 = 保留遮罩 = 擋住相機
-        Transform.translate(
-          offset: Offset(left, top),
+        // 上層：只在剪影形狀內顯示（移除遮罩）
+        // 使用 BlendMode.dstIn
+        // dstIn: 只保留目標在來源有內容的區域
+        // 我們的剪影：黑色（貓咪）= 有內容，透明 = 無內容
+        // 所以結果：只在黑色（貓咪）區域顯示下面的相機
+        Positioned(
+          left: left,
+          top: top,
           child: Transform.rotate(
             angle: _rotation,
             child: Transform.scale(
               scale: _isFlipped ? -_scale : _scale,
+              alignment: Alignment.center,
               child: ShaderMask(
                 shaderCallback: (bounds) {
+                  // 建立縮放矩陣
+                  final matrix = Matrix4.identity();
+                  matrix.scale(
+                    bounds.width / _stencilImage!.width,
+                    bounds.height / _stencilImage!.height,
+                  );
                   return ImageShader(
                     _stencilImage!,
                     TileMode.clamp,
                     TileMode.clamp,
-                    Matrix4.identity().storage,
+                    matrix.storage,
                   );
                 },
-                blendMode: BlendMode.dstOut,
+                blendMode: BlendMode.dstIn,
                 child: Container(
                   width: stencilSize,
                   height: stencilSize,
-                  color: Colors.white, // 白色會被移除
+                  // 白色：表示"顯示"區域
+                  // 黑色（貓咪）在剪影中 = 顯示相機
+                  color: Colors.white,
                 ),
               ),
             ),
