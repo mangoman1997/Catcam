@@ -43,17 +43,22 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
   }
 
   Future<void> _loadStencilImage() async {
+    debugPrint('_loadStencilImage called, selectedStencil: ${widget.state.selectedStencil?.name ?? "null"}');
+    
     if (widget.state.selectedStencil == null) {
+      debugPrint('No stencil selected, skipping load');
       setState(() => _updateLoadState());
       return;
     }
 
     try {
+      debugPrint('Loading stencil from: ${widget.state.selectedStencil!.assetPath}');
       final data = await DefaultAssetBundle.of(context)
           .load(widget.state.selectedStencil!.assetPath);
       final bytes = data.buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      debugPrint('Stencil loaded: ${frame.image.width}x${frame.image.height}');
       
       if (mounted) {
         _stencilImage = frame.image;
@@ -100,6 +105,12 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
   Widget build(BuildContext context) {
     final editorState = widget.state;
 
+    debugPrint('CompositePreview.build: capturedImage=${editorState.capturedImage != null}, '
+        'selectedStencil=${editorState.selectedStencil?.name ?? "null"}, '
+        'stencilImage=${_stencilImage != null}, '
+        'capturedImageLoaded=${_capturedImage != null}, '
+        'imagesLoaded=$_imagesLoaded');
+
     // 沒有照片，顯示背景色
     if (editorState.capturedImage == null) {
       return Container(color: AppColors.cameraBackground);
@@ -107,6 +118,7 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
 
     // 沒有剪影，直接顯示照片
     if (!_imagesLoaded || _stencilImage == null || _capturedImage == null) {
+      debugPrint('Showing raw image (no stencil applied)');
       return Image.memory(
         editorState.capturedImage!,
         fit: BoxFit.cover,
@@ -114,6 +126,7 @@ class _CompositePreviewState extends ConsumerState<CompositePreview> {
     }
 
     // 有剪影：把照片裁剪成貓咪形狀
+    debugPrint('Applying cat stencil mask!');
     return _CatCropWidget(
       stencilImage: _stencilImage!,
       capturedImage: _capturedImage!,
